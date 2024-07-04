@@ -1,0 +1,67 @@
+# Install necessary libraries
+!pip install transformers[torch] accelerate datasets
+
+# Import libraries
+from transformers import GPT2Tokenizer, GPT2LMHeadModel, DataCollatorForLanguageModeling, Trainer, TrainingArguments
+from datasets import load_dataset
+
+# Load the IMDB dataset
+dataset = load_dataset('imdb')
+train_dataset = dataset['train']
+
+# Sample a smaller subset (e.g., 20 samples)
+small_train_dataset = train_dataset.shuffle(seed=42).select(range(20))
+
+# Initialize tokenizer
+tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+
+# Set the pad_token to the eos_token
+tokenizer.pad_token = tokenizer.eos_token
+
+# Tokenize dataset
+def tokenize_function(examples):
+    return tokenizer(examples['text'], padding='max_length', truncation=True)
+
+tokenized_dataset = small_train_dataset.map(tokenize_function, batched=True, remove_columns=["text"])
+tokenized_dataset.set_format(type='torch', columns=['input_ids', 'attention_mask'])
+
+# Create data collator
+data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+# Load pre-trained model
+model = GPT2LMHeadModel.from_pretrained('gpt2')
+
+# Set up training arguments
+training_args = TrainingArguments(
+    output_dir='./results',
+    overwrite_output_dir=True,
+    num_train_epochs=1,  # Set to 1 for faster training
+    per_device_train_batch_size=1,  # Reduce batch size
+    save_steps=10_000,
+    save_total_limit=2,
+)
+
+# Initialize Trainer
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    data_collator=data_collator,
+    train_dataset=tokenized_dataset,
+)
+
+# Train the model
+trainer.train()
+
+# Save the model
+model.save_pretrained('./fine-tuned-gpt2')
+tokenizer.save_pretrained('./fine-tuned-gpt2')
+
+# Generate text
+from transformers import pipeline
+
+generator = pipeline('text-generation', model='./fine-tuned-gpt2')
+
+prompt = "Train a model to generate coherent and contextually relevant text"
+generated_text = generator(prompt, max_length=50, num_return_sequences=1)
+
+print(generated_text)
